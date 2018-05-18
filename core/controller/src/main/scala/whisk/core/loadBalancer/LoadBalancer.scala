@@ -66,14 +66,7 @@ trait LoadBalancer {
    */
   def invokerHealth(): Future[IndexedSeq[InvokerHealth]]
 
-  /** Gets the number of in-flight activations for a specific user. */
-  def activeActivationsFor(namespace: UUID): Future[Int]
-
-  /** Gets the number of in-flight activations in the system. */
-  def totalActiveActivations: Future[Int]
-
-  /** Gets the size of the cluster all loadbalancers are acting in */
-  def clusterSize: Int = 1
+  def throttler(): Throttler
 }
 
 /**
