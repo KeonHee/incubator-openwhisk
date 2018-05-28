@@ -17,13 +17,12 @@
 
 package whisk.core.entitlement
 
-import scala.collection.concurrent.TrieMap
-
-import whisk.common.Logging
-import whisk.common.TransactionId
-import whisk.core.entity.Identity
-import whisk.core.entity.UUID
 import java.util.concurrent.atomic.AtomicInteger
+
+import whisk.common.{Logging, TransactionId}
+import whisk.core.entity.{Identity, UUID}
+
+import scala.collection.concurrent.TrieMap
 
 /**
  * A class tracking the rate of invocation (or any operation) by subject (any key really).

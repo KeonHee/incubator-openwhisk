@@ -17,22 +17,25 @@
 
 package whisk.core.entitlement
 
-import whisk.common.Logging
-import whisk.common.TransactionId
-import whisk.core.entity.Identity
-import whisk.core.loadBalancer.LoadBalancer
+import whisk.common.{Logging, TransactionId}
+import whisk.core.entity.{Identity, UUID}
 import whisk.http.Messages
 
 import scala.concurrent.{ExecutionContext, Future}
 
+}
 /**
- * Determine whether the namespace currently invoking a new action should be allowed to do so.
- *
- * @param loadBalancer contains active quotas
- * @param concurrencyLimit a calculated limit relative to the user using the system
- * @param systemOverloadLimit the limit when the system is considered overloaded
- */
-class ActivationThrottler(loadBalancer: LoadBalancer, concurrencyLimit: Identity => Int, systemOverloadLimit: Int)(
+  * Determine whether the namespace currently invoking a new action should be allowed to do so.
+  *
+  * @param concurrencyLimit a calculated limit relative to the user using the system
+  * @param activeActivationsFor the number of in-flight activations for a specific user
+  * @param totalActiveActivations the number of in-flight activations in the system.
+  * @param systemOverloadLimit the limit when the system is considered overloaded
+  */
+class ActivationThrottler(concurrencyLimit: Identity => Int,
+                          activeActivationsFor: UUID => Future[Int],
+                          totalActiveActivations: => Future[Int],
+                          systemOverloadLimit: Int)(
   implicit logging: Logging,
   executionContext: ExecutionContext) {
 
@@ -42,7 +45,7 @@ class ActivationThrottler(loadBalancer: LoadBalancer, concurrencyLimit: Identity
    * Checks whether the operation should be allowed to proceed.
    */
   def check(user: Identity)(implicit tid: TransactionId): Future[RateLimit] = {
-    loadBalancer.activeActivationsFor(user.uuid).map { concurrentActivations =>
+    activeActivationsFor(user.uuid).map { concurrentActivations =>
       val currentLimit = concurrencyLimit(user)
       logging.debug(
         this,
@@ -55,7 +58,7 @@ class ActivationThrottler(loadBalancer: LoadBalancer, concurrencyLimit: Identity
    * Checks whether the system is in a generally overloaded state.
    */
   def isOverloaded()(implicit tid: TransactionId): Future[Boolean] = {
-    loadBalancer.totalActiveActivations.map { concurrentActivations =>
+    totalActiveActivations.map { concurrentActivations =>
       val overloaded = concurrentActivations > systemOverloadLimit
       if (overloaded)
         logging.info(

@@ -17,26 +17,20 @@
 
 package whisk.core.entitlement
 
+import akka.actor.ActorSystem
+import akka.http.scaladsl.model.StatusCodes.Forbidden
+import whisk.common.{Logging, TransactionId}
+import whisk.core.WhiskConfig
+import whisk.core.controller.RejectRequest
+import whisk.core.entitlement.Privilege.{ACTIVATE, REJECT}
+import whisk.core.entity._
+import whisk.core.loadBalancer.Throttler
+import whisk.http.{ErrorResponse, Messages}
+
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.Set
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Failure
-import scala.util.Success
-import akka.actor.ActorSystem
-import akka.http.scaladsl.model.StatusCodes.Forbidden
-import akka.http.scaladsl.model.StatusCodes.TooManyRequests
-import whisk.core.entitlement.Privilege.ACTIVATE
-import whisk.core.entitlement.Privilege.REJECT
-import whisk.common.{Logging, TransactionId, UserEvents}
-import whisk.connector.kafka.KafkaMessagingProvider
-import whisk.core.WhiskConfig
-import whisk.core.connector.{EventMessage, Metric}
-import whisk.core.controller.RejectRequest
-import whisk.core.entity._
-import whisk.core.loadBalancer.{LoadBalancer, ShardingContainerPoolBalancer}
-import whisk.http.ErrorResponse
-import whisk.http.Messages
-import whisk.http.Messages._
+import scala.util.{Failure, Success}
 
 package object types {
   type Entitlements = TrieMap[(Subject, String), Set[Privilege]]
@@ -76,74 +70,10 @@ protected[core] object EntitlementProvider {
  */
 protected[core] abstract class EntitlementProvider(
   config: WhiskConfig,
-  loadBalancer: LoadBalancer,
+  throttler: Throttler,
   controllerInstance: InstanceId)(implicit actorSystem: ActorSystem, logging: Logging) {
 
   private implicit val executionContext: ExecutionContext = actorSystem.dispatcher
-
-  /**
-   * Allows 20% of additional requests on top of the limit to mitigate possible unfair round-robin loadbalancing between
-   * controllers
-   */
-  private def overcommit(clusterSize: Int) = if (clusterSize > 1) 1.2 else 1
-  private def dilateLimit(limit: Int): Int = Math.ceil(limit.toDouble * overcommit(loadBalancer.clusterSize)).toInt
-
-  /**
-   * Calculates a possibly dilated limit relative to the current user.
-   *
-   * @param defaultLimit the default limit across the whole system
-   * @param user the user to apply that limit to
-   * @return a calculated limit
-   */
-  private def calculateLimit(defaultLimit: Int, overrideLimit: Identity => Option[Int])(user: Identity): Int = {
-    val absoluteLimit = overrideLimit(user).getOrElse(defaultLimit)
-    dilateLimit(absoluteLimit)
-  }
-
-  /**
-   * Calculates a limit which applies only to this instance individually.
-   *
-   * The state needed to correctly check this limit is not shared between all instances, which want to check that
-   * limit, so it needs to be divided between the parties who want to perform that check.
-   *
-   * @param defaultLimit the default limit across the whole system
-   * @param user the user to apply that limit to
-   * @return a calculated limit
-   */
-  private def calculateIndividualLimit(defaultLimit: Int, overrideLimit: Identity => Option[Int])(
-    user: Identity): Int = {
-    val limit = calculateLimit(defaultLimit, overrideLimit)(user)
-    if (limit == 0) {
-      0
-    } else {
-      // Edge case: Iff the divided limit is < 1 no loadbalancer would allow an action to be executed, thus we range
-      // bound to at least 1
-      (limit / loadBalancer.clusterSize).max(1)
-    }
-  }
-
-  private val invokeRateThrottler =
-    new RateThrottler(
-      "actions per minute",
-      calculateIndividualLimit(config.actionInvokePerMinuteLimit.toInt, _.limits.invocationsPerMinute))
-  private val triggerRateThrottler =
-    new RateThrottler(
-      "triggers per minute",
-      calculateIndividualLimit(config.triggerFirePerMinuteLimit.toInt, _.limits.firesPerMinute))
-
-  private val activationThrottleCalculator = loadBalancer match {
-    // This loadbalancer applies sharding and does not share any state
-    case _: ShardingContainerPoolBalancer => calculateIndividualLimit _
-    // Activation relevant data is shared by all other loadbalancers
-    case _ => calculateLimit _
-  }
-  private val concurrentInvokeThrottler =
-    new ActivationThrottler(
-      loadBalancer,
-      activationThrottleCalculator(config.actionInvokeConcurrentLimit.toInt, _.limits.concurrentInvocations),
-      config.actionInvokeSystemOverloadLimit.toInt)
-
-  private val eventProducer = KafkaMessagingProvider.getProducer(this.config)
 
   /**
    * Grants a subject the right to access a resources.
@@ -187,9 +117,7 @@ protected[core] abstract class EntitlementProvider(
   protected[core] def checkThrottles(user: Identity)(implicit transid: TransactionId): Future[Unit] = {
 
     logging.debug(this, s"checking user '${user.subject}' has not exceeded activation quota")
-    checkSystemOverload(ACTIVATE)
-      .flatMap(_ => checkThrottleOverload(Future.successful(invokeRateThrottler.check(user)), user))
-      .flatMap(_ => checkThrottleOverload(concurrentInvokeThrottler.check(user), user))
+    throttler.check(user, ACTIVATE, Set.empty)
   }
 
   /**
@@ -248,9 +176,7 @@ protected[core] abstract class EntitlementProvider(
         val throttleCheck =
           if (noThrottle) Future.successful(())
           else
-            checkSystemOverload(right)
-              .flatMap(_ => checkUserThrottle(user, right, resources))
-              .flatMap(_ => checkConcurrentUserThrottle(user, right, resources))
+            throttler.check(user, right, resources)
         throttleCheck
           .flatMap(_ => checkPrivilege(user, right, resources))
           .flatMap(checkedResources => {
@@ -298,101 +224,6 @@ protected[core] abstract class EntitlementProvider(
             logging.debug(this, "checking explicit grants")
             entitled(user.subject, right, resource).flatMap(b => Future.successful(resource -> b))
         }
-      }
-    }
-  }
-
-  /**
-   * Limits activations if the system is overloaded.
-   *
-   * @param right the privilege, if ACTIVATE then check quota else return None
-   * @return future completing successfully if system is not overloaded else failing with a rejection
-   */
-  protected def checkSystemOverload(right: Privilege)(implicit transid: TransactionId): Future[Unit] = {
-    concurrentInvokeThrottler.isOverloaded.flatMap { isOverloaded =>
-      val systemOverload = right == ACTIVATE && isOverloaded
-      if (systemOverload) {
-        logging.error(this, "system is overloaded")
-        Future.failed(RejectRequest(TooManyRequests, systemOverloaded))
-      } else Future.successful(())
-    }
-  }
-
-  /**
-   * Limits activations if subject exceeds their own limits.
-   * If the requested right is an activation, the set of resources must contain an activation of an action or filter to be throttled.
-   * While it is possible for the set of resources to contain more than one action or trigger, the plurality is ignored and treated
-   * as one activation since these should originate from a single macro resources (e.g., a sequence).
-   *
-   * @param user the subject identity to check rights for
-   * @param right the privilege, if ACTIVATE then check quota else return None
-   * @param resources the set of resources must contain at least one resource that can be activated else return None
-   * @return future completing successfully if user is below limits else failing with a rejection
-   */
-  private def checkUserThrottle(user: Identity, right: Privilege, resources: Set[Resource])(
-    implicit transid: TransactionId): Future[Unit] = {
-    if (right == ACTIVATE) {
-      if (resources.exists(_.collection.path == Collection.ACTIONS)) {
-        checkThrottleOverload(Future.successful(invokeRateThrottler.check(user)), user)
-      } else if (resources.exists(_.collection.path == Collection.TRIGGERS)) {
-        checkThrottleOverload(Future.successful(triggerRateThrottler.check(user)), user)
-      } else Future.successful(())
-    } else Future.successful(())
-  }
-
-  /**
-   * Limits activations if subject exceeds limit of concurrent invocations.
-   * If the requested right is an activation, the set of resources must contain an activation of an action to be throttled.
-   * While it is possible for the set of resources to contain more than one action, the plurality is ignored and treated
-   * as one activation since these should originate from a single macro resources (e.g., a sequence).
-   *
-   * @param user the subject identity to check rights for
-   * @param right the privilege, if ACTIVATE then check quota else return None
-   * @param resources the set of resources must contain at least one resource that can be activated else return None
-   * @return future completing successfully if user is below limits else failing with a rejection
-   */
-  private def checkConcurrentUserThrottle(user: Identity, right: Privilege, resources: Set[Resource])(
-    implicit transid: TransactionId): Future[Unit] = {
-    if (right == ACTIVATE && resources.exists(_.collection.path == Collection.ACTIONS)) {
-      checkThrottleOverload(concurrentInvokeThrottler.check(user), user)
-    } else Future.successful(())
-  }
-
-  private def checkThrottleOverload(throttle: Future[RateLimit], user: Identity)(
-    implicit transid: TransactionId): Future[Unit] = {
-    throttle.flatMap { limit =>
-      val userId = user.authkey.uuid
-      if (limit.ok) {
-        limit match {
-          case c: ConcurrentRateLimit => {
-            val metric =
-              Metric("ConcurrentInvocations", c.count + 1)
-            UserEvents.send(
-              eventProducer,
-              EventMessage(
-                s"controller${controllerInstance.instance}",
-                metric,
-                user.subject,
-                user.namespace.toString,
-                userId,
-                metric.typeName))
-          }
-          case _ => // ignore
-        }
-        Future.successful(())
-      } else {
-        logging.info(this, s"'${user.namespace}' has exceeded its throttle limit, ${limit.errorMsg}")
-        val metric = Metric(limit.limitName, 1)
-        UserEvents.send(
-          eventProducer,
-          EventMessage(
-            s"controller${controllerInstance.instance}",
-            metric,
-            user.subject,
-            user.namespace.toString,
-            userId,
-            metric.typeName))
-        Future.failed(RejectRequest(TooManyRequests, limit.errorMsg))
       }
     }
   }

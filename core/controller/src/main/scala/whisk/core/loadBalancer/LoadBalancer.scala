@@ -17,14 +17,16 @@
 
 package whisk.core.loadBalancer
 
-import scala.concurrent.Future
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import whisk.common.{Logging, TransactionId}
 import whisk.core.WhiskConfig
 import whisk.core.connector._
+import whisk.core.entitlement.{Privilege, Resource}
 import whisk.core.entity._
 import whisk.spi.Spi
+
+import scala.concurrent.Future
 
 /**
  * Describes an abstract invoker. An invoker is a local container pool manager that
@@ -66,14 +68,6 @@ trait LoadBalancer {
    */
   def invokerHealth(): Future[IndexedSeq[InvokerHealth]]
 
-  /** Gets the number of in-flight activations for a specific user. */
-  def activeActivationsFor(namespace: UUID): Future[Int]
-
-  /** Gets the number of in-flight activations in the system. */
-  def totalActiveActivations: Future[Int]
-
-  /** Gets the size of the cluster all loadbalancers are acting in */
-  def clusterSize: Int = 1
 }
 
 /**
@@ -85,6 +79,27 @@ trait LoadBalancerProvider extends Spi {
   def loadBalancer(whiskConfig: WhiskConfig, instance: InstanceId)(implicit actorSystem: ActorSystem,
                                                                    logging: Logging,
                                                                    materializer: ActorMaterializer): LoadBalancer
+
+  def throttler(whiskConfig: WhiskConfig, instance: InstanceId, loadBalancer: LoadBalancer)(implicit actorSystem: ActorSystem,
+                                                                logging: Logging): Throttler
+}
+
+/**
+  *
+  */
+trait Throttler {
+
+  /**
+    * Check throttling
+    *
+    * @param user
+    * @param right
+    * @param resources
+    * @return
+    */
+  def check(user: Identity, right: Privilege, resources: Set[Resource])(
+    implicit transid: TransactionId): Future[Unit]
+
 }
 
 /** Exception thrown by the loadbalancer */
