@@ -124,7 +124,7 @@ class Controller(val instance: InstanceId,
   logging.info(this, s"throttler initialized: ${loadBalancer.getClass.getSimpleName}")(TransactionId.controller)
 
   private implicit val entitlementProvider =
-    new LocalEntitlementProvider(whiskConfig, throttler, instance)
+    new LocalEntitlementProvider(whiskConfig, instance)
   private implicit val activationIdFactory = new ActivationIdGenerator {}
   private implicit val logStore = SpiLoader.get[LogStoreProvider].logStore(actorSystem)
 

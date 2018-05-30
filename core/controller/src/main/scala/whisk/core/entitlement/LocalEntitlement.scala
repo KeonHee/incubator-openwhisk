@@ -21,7 +21,6 @@ import akka.actor.ActorSystem
 import whisk.common.{Logging, TransactionId}
 import whisk.core.WhiskConfig
 import whisk.core.entity.{InstanceId, Subject}
-import whisk.core.loadBalancer.Throttler
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.Future
@@ -34,9 +33,8 @@ private object LocalEntitlementProvider {
 
 protected[core] class LocalEntitlementProvider(
   private val config: WhiskConfig,
-  private val throttler: Throttler,
   private val controllerInstance: InstanceId)(implicit actorSystem: ActorSystem, logging: Logging)
-    extends EntitlementProvider(config, throttler, controllerInstance) {
+    extends EntitlementProvider(config, controllerInstance) {
 
   private implicit val executionContext = actorSystem.dispatcher
 

@@ -20,7 +20,7 @@ package whisk.core.controller
 import whisk.core.WhiskConfig
 import whisk.core.entitlement._
 import whisk.core.entity.ActivationId.ActivationIdGenerator
-import whisk.core.loadBalancer.LoadBalancer
+import whisk.core.loadBalancer.{LoadBalancer, Throttler}
 
 /**
  * A trait which defines a few services which a whisk microservice may rely on.
@@ -38,4 +38,7 @@ trait WhiskServices {
 
   /** A load balancing service that launches invocations. */
   protected val loadBalancer: LoadBalancer
+
+  /** A throttler to limit activation */
+  protected val throttler: Throttler
 }

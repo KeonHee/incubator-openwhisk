@@ -94,6 +94,17 @@ trait Throttler {
     *
     * @param user
     * @param right
+    * @param resource
+    * @return
+    */
+  def check(user: Identity, right: Privilege, resource: Resource)(
+    implicit transid: TransactionId): Future[Unit]
+
+  /**
+    * Check throttling
+    *
+    * @param user
+    * @param right
     * @param resources
     * @return
     */

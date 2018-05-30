@@ -477,17 +477,39 @@ class ShardingContainerThrottler(config: WhiskConfig,
     }
   }
 
+//  override def checkAction(user: Identity)(
+//    implicit transid: TransactionId): Future[Unit] = {
+//    logging.debug(this, s"checking user '${user.subject}' has not exceeded activation quota")
+//    checkSystemOverload
+//      .flatMap(_ => checkThrottleOverload(Future.successful(invokeRateThrottler.check(user)), user))
+//      .flatMap(_ => checkThrottleOverload(concurrentInvokeThrottler.check(user), user))
+//  }
+
+  /**
+    * Check throttling
+    *
+    * @param user
+    * @param right
+    * @param resource
+    * @return
+    */
+  override def check(user: Identity, right: Privilege, resource: Resource)(
+    implicit transid: TransactionId): Future[Unit] = check(user, right, Set(resource))
+
+  /**
+    * Check throttling
+    *
+    * @param user
+    * @param right
+    * @param resources
+    * @return
+    */
   override def check(user: Identity, right: Privilege, resources: Set[Resource])(
     implicit transid: TransactionId): Future[Unit] = {
-    if(resources.isEmpty) {
-      checkSystemOverload(right)
-        .flatMap(_ => checkUserThrottle(user, right, resources))
-        .flatMap(_ => checkConcurrentUserThrottle(user, right, resources))
-    } else {
-      checkSystemOverload(ACTIVATE)
-        .flatMap(_ => checkThrottleOverload(Future.successful(invokeRateThrottler.check(user)), user))
-        .flatMap(_ => checkThrottleOverload(concurrentInvokeThrottler.check(user), user))
-    }
+    logging.debug(this, s"checking user '${user.subject}' has not exceeded activation quota")
+    checkSystemOverload(right)
+      .flatMap(_ => checkUserThrottle(user, right, resources))
+      .flatMap(_ => checkConcurrentUserThrottle(user, right, resources))
   }
 }
 

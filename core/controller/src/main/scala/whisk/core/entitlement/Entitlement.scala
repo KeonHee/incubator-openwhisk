@@ -22,9 +22,8 @@ import akka.http.scaladsl.model.StatusCodes.Forbidden
 import whisk.common.{Logging, TransactionId}
 import whisk.core.WhiskConfig
 import whisk.core.controller.RejectRequest
-import whisk.core.entitlement.Privilege.{ACTIVATE, REJECT}
+import whisk.core.entitlement.Privilege.REJECT
 import whisk.core.entity._
-import whisk.core.loadBalancer.Throttler
 import whisk.http.{ErrorResponse, Messages}
 
 import scala.collection.concurrent.TrieMap
@@ -70,7 +69,6 @@ protected[core] object EntitlementProvider {
  */
 protected[core] abstract class EntitlementProvider(
   config: WhiskConfig,
-  throttler: Throttler,
   controllerInstance: InstanceId)(implicit actorSystem: ActorSystem, logging: Logging) {
 
   private implicit val executionContext: ExecutionContext = actorSystem.dispatcher
@@ -107,18 +105,6 @@ protected[core] abstract class EntitlementProvider(
    */
   protected def entitled(subject: Subject, right: Privilege, resource: Resource)(
     implicit transid: TransactionId): Future[Boolean]
-
-  /**
-   * Checks action activation rate throttles for an identity.
-   *
-   * @param user the identity to check rate throttles for
-   * @return a promise that completes with success iff the user is within their activation quota
-   */
-  protected[core] def checkThrottles(user: Identity)(implicit transid: TransactionId): Future[Unit] = {
-
-    logging.debug(this, s"checking user '${user.subject}' has not exceeded activation quota")
-    throttler.check(user, ACTIVATE, Set.empty)
-  }
 
   /**
    * Checks if a subject has the right to access a specific resource. The entitlement may be implicit,
@@ -163,22 +149,16 @@ protected[core] abstract class EntitlementProvider(
    * @param user the subject identity to check rights for
    * @param right the privilege the subject is requesting (applies to the entire set of resources)
    * @param resources the set of resources the subject requests access to
-   * @param noThrottle ignore throttle limits
    * @return a promise that completes with success iff the subject is permitted to access all of the requested resources
    */
-  protected[core] def check(user: Identity, right: Privilege, resources: Set[Resource], noThrottle: Boolean = false)(
+  protected[core] def check(user: Identity, right: Privilege, resources: Set[Resource])(
     implicit transid: TransactionId): Future[Unit] = {
     val subject = user.subject
 
     val entitlementCheck: Future[Unit] = if (user.rights.contains(right)) {
       if (resources.nonEmpty) {
         logging.debug(this, s"checking user '$subject' has privilege '$right' for '${resources.mkString(", ")}'")
-        val throttleCheck =
-          if (noThrottle) Future.successful(())
-          else
-            throttler.check(user, right, resources)
-        throttleCheck
-          .flatMap(_ => checkPrivilege(user, right, resources))
+        checkPrivilege(user, right, resources)
           .flatMap(checkedResources => {
             val failedResources = checkedResources.filterNot(_._2)
             if (failedResources.isEmpty) Future.successful(())
@@ -268,6 +248,8 @@ trait ReferencedEntities {
         e.components.map { c =>
           Resource(c.path, Collection(Collection.ACTIONS), Some(c.name.asString))
         }.toSet
+      case FullyQualifiedEntityName(path, name, _) =>
+        Set(Resource(path, Collection(Collection.ACTIONS), Some(name.asString)))
       case _ => Set()
     }
   }

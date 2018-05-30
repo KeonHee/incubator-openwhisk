@@ -19,43 +19,31 @@ package whisk.core.controller
 
 import java.util.Base64
 
-import scala.concurrent.Future
-import scala.util.{Failure, Success, Try}
 import akka.http.scaladsl.model.HttpEntity.Empty
-import akka.http.scaladsl.server.Directives
-import akka.http.scaladsl.model.HttpMethod
-import akka.http.scaladsl.model.HttpHeader
-import akka.http.scaladsl.model.MediaType
-import akka.http.scaladsl.model.MediaTypes
+import akka.http.scaladsl.model.HttpMethods._
 import akka.http.scaladsl.model.MediaTypes._
+import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.StatusCodes._
-import akka.http.scaladsl.model.StatusCode
-import akka.http.scaladsl.model.headers.RawHeader
-import akka.http.scaladsl.model.headers._
 import akka.http.scaladsl.model.Uri.Query
-import akka.http.scaladsl.model.HttpEntity
-import akka.http.scaladsl.server.Route
-import akka.http.scaladsl.model.headers.`Content-Type`
-import akka.http.scaladsl.model.headers.`Timeout-Access`
-import akka.http.scaladsl.model.ContentType
-import akka.http.scaladsl.model.ContentTypes
-import akka.http.scaladsl.model.FormData
-import akka.http.scaladsl.model.HttpMethods.{DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT}
-import akka.http.scaladsl.model.HttpCharsets
-import akka.http.scaladsl.model.HttpResponse
-import spray.json._
+import akka.http.scaladsl.model.headers.{RawHeader, `Content-Type`, `Timeout-Access`, _}
+import akka.http.scaladsl.server.{Directives, Route}
 import spray.json.DefaultJsonProtocol._
-import WhiskWebActionsApi.MediaExtension
-import RestApiCommons.{jsonPrettyResponsePrinter => jsonPrettyPrinter}
+import spray.json._
 import whisk.common.TransactionId
+import whisk.core.controller.RestApiCommons.{jsonPrettyResponsePrinter => jsonPrettyPrinter}
+import whisk.core.controller.WhiskWebActionsApi.MediaExtension
 import whisk.core.controller.actions.PostActionActivation
 import whisk.core.database._
+import whisk.core.entitlement.{Privilege, ReferencedEntities}
 import whisk.core.entity._
 import whisk.core.entity.types._
 import whisk.http.ErrorResponse.terminate
-import whisk.http.Messages
 import whisk.http.LenientSprayJsonSupport._
+import whisk.http.Messages
 import whisk.utils.JsHelpers._
+
+import scala.concurrent.Future
+import scala.util.{Failure, Success, Try}
 
 protected[controller] sealed class WebApiDirectives(prefix: String = "__ow_") {
   // enforce the presence of an extension (e.g., .http) in the URI path
@@ -348,7 +336,7 @@ protected[core] object WhiskWebActionsApi extends Directives {
     headers.filter(_.lowercaseName != `Content-Type`.lowercaseName)
 }
 
-trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostActionActivation {
+trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostActionActivation with ReferencedEntities {
   services: WhiskServices =>
 
   /** API path invocation path for posting activations directly through the host. */
@@ -534,7 +522,7 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
     for {
       // lookup the identity for the action namespace
       actionOwnerIdentity <- identityLookup(actionName.path.root) flatMap { i =>
-        entitlementProvider.checkThrottles(i) map (_ => i)
+        throttler.check(i, Privilege.ACTIVATE, referencedEntities(actionName)) map (_ => i)
       }
 
       // lookup the action - since actions are stored relative to package name

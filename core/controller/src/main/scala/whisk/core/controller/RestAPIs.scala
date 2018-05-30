@@ -18,11 +18,9 @@
 package whisk.core.controller
 
 import scala.concurrent.ExecutionContext
-
 import scala.util.Failure
 import scala.util.Success
 import scala.util.Try
-
 import akka.actor.ActorSystem
 import akka.http.scaladsl.model.StatusCodes._
 import akka.http.scaladsl.model.Uri
@@ -31,7 +29,6 @@ import akka.http.scaladsl.server.Route
 import akka.http.scaladsl.model.headers._
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import akka.stream.ActorMaterializer
-
 import spray.json._
 import spray.json.DefaultJsonProtocol._
 import whisk.core.database.CacheChangeNotification
@@ -46,7 +43,7 @@ import whisk.core.entity._
 import whisk.core.entity.ActivationId.ActivationIdGenerator
 import whisk.core.entity.WhiskAuthStore
 import whisk.core.entity.types._
-import whisk.core.loadBalancer.LoadBalancer
+import whisk.core.loadBalancer.{LoadBalancer, Throttler}
 import whisk.http.Messages
 
 /**
@@ -171,6 +168,7 @@ class RestAPIVersion(config: WhiskConfig, apiPath: String, apiVersion: String)(
   implicit val entitlementProvider: EntitlementProvider,
   implicit val activationIdFactory: ActivationIdGenerator,
   implicit val loadBalancer: LoadBalancer,
+  implicit val throttler: Throttler,
   implicit val cacheChangeNotification: Some[CacheChangeNotification],
   implicit val activationStore: ActivationStore,
   implicit val logStore: LogStore,
@@ -248,6 +246,7 @@ class RestAPIVersion(config: WhiskConfig, apiPath: String, apiVersion: String)(
     override val entitlementProvider: EntitlementProvider,
     override val activationIdFactory: ActivationIdGenerator,
     override val loadBalancer: LoadBalancer,
+    override val throttler: Throttler,
     override val cacheChangeNotification: Some[CacheChangeNotification],
     override val executionContext: ExecutionContext,
     override val logging: Logging,
@@ -271,6 +270,7 @@ class RestAPIVersion(config: WhiskConfig, apiPath: String, apiVersion: String)(
     override val entitlementProvider: EntitlementProvider,
     override val activationIdFactory: ActivationIdGenerator,
     override val loadBalancer: LoadBalancer,
+    override val throttler: Throttler,
     override val cacheChangeNotification: Some[CacheChangeNotification],
     override val executionContext: ExecutionContext,
     override val logging: Logging,
@@ -284,6 +284,7 @@ class RestAPIVersion(config: WhiskConfig, apiPath: String, apiVersion: String)(
     override val entitlementProvider: EntitlementProvider,
     override val activationIdFactory: ActivationIdGenerator,
     override val loadBalancer: LoadBalancer,
+    override val throttler: Throttler,
     override val cacheChangeNotification: Some[CacheChangeNotification],
     override val executionContext: ExecutionContext,
     override val logging: Logging,
@@ -298,6 +299,7 @@ class RestAPIVersion(config: WhiskConfig, apiPath: String, apiVersion: String)(
     override val activationStore: ActivationStore,
     override val activationIdFactory: ActivationIdGenerator,
     override val loadBalancer: LoadBalancer,
+    override val throttler: Throttler,
     override val cacheChangeNotification: Some[CacheChangeNotification],
     override val executionContext: ExecutionContext,
     override val logging: Logging,
@@ -315,6 +317,7 @@ class RestAPIVersion(config: WhiskConfig, apiPath: String, apiVersion: String)(
     override val entitlementProvider: EntitlementProvider,
     override val activationIdFactory: ActivationIdGenerator,
     override val loadBalancer: LoadBalancer,
+    override val throttler: Throttler,
     override val actorSystem: ActorSystem,
     override val executionContext: ExecutionContext,
     override val logging: Logging,
