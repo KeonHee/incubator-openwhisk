@@ -21,7 +21,6 @@ import java.time.{Clock, Instant}
 import java.util.concurrent.atomic.AtomicReference
 
 import akka.actor.ActorSystem
-import spray.json._
 import org.apache.openwhisk.common.{Logging, TransactionId, UserEvents}
 import org.apache.openwhisk.core.connector.{EventMessage, MessagingProvider}
 import org.apache.openwhisk.core.controller.WhiskServices
@@ -32,6 +31,8 @@ import org.apache.openwhisk.core.entity.types._
 import org.apache.openwhisk.http.Messages._
 import org.apache.openwhisk.spi.SpiLoader
 import org.apache.openwhisk.utils.ExecutionContextFactory.FutureExtensions
+import spray.json.DefaultJsonProtocol._
+import spray.json._
 
 import scala.collection._
 import scala.concurrent.duration._
@@ -217,14 +218,14 @@ protected[actions] trait SequenceActions {
       end = end,
       cause = if (topmost) None else cause, // propagate the cause for inner sequences, but undefined for topmost
       response = accounting.previousResponse.getAndSet(null), // getAndSet(null) drops reference to the activation result
-      logs = accounting.finalLogs,
       version = action.version,
       publish = false,
       annotations = Parameters(WhiskActivation.topmostAnnotation, JsBoolean(topmost)) ++
         Parameters(WhiskActivation.pathAnnotation, JsString(action.fullyQualifiedName(false).asString)) ++
         Parameters(WhiskActivation.kindAnnotation, JsString(Exec.SEQUENCE)) ++
         causedBy ++
-        sequenceLimits,
+        sequenceLimits ++
+        accounting.finalAnnotations,
       duration = Some(accounting.duration))
   }
 
@@ -400,13 +401,13 @@ protected[actions] trait SequenceActions {
  */
 protected[actions] case class SequenceAccounting(atomicActionCnt: Int,
                                                  previousResponse: AtomicReference[ActivationResponse],
-                                                 logs: mutable.Buffer[ActivationId],
+                                                 components: mutable.Buffer[ActivationId],
                                                  duration: Long = 0,
                                                  maxMemory: Option[Int] = None,
                                                  shortcircuit: Boolean = false) {
 
-  /** @return the ActivationLogs data structure for this sequence invocation */
-  def finalLogs = ActivationLogs(logs.map(id => id.asString).toVector)
+  /** @return the Annotations data structure for this sequence invocation */
+  def finalAnnotations = Parameters("components", components.map(id => id.asString).toIterable.toJson)
 
   /** The previous activation was successful. */
   private def success(activation: WhiskActivation, newCnt: Int, shortcircuit: Boolean = false) = {
@@ -429,7 +430,7 @@ protected[actions] case class SequenceAccounting(atomicActionCnt: Int,
   /** The previous activation failed (this is used when there is no activation record or an internal error. */
   def fail(failureResponse: ActivationResponse, activationId: Option[ActivationId]) = {
     require(!failureResponse.isSuccess)
-    logs.appendAll(activationId)
+    components.appendAll(activationId)
     copy(previousResponse = new AtomicReference(failureResponse), shortcircuit = true)
   }
 
@@ -490,12 +491,12 @@ protected[actions] object SequenceAccounting {
     val newMaxMemory = maxMemory(prev.maxMemory, newMemoryLimit)
 
     // append log entry
-    prev.logs += newActivationId
+    prev.components += newActivationId
 
     SequenceAccounting(
       atomicActionCnt = newCnt,
       previousResponse = new AtomicReference(newResponse),
-      logs = prev.logs,
+      components = prev.components,
       duration = incrDuration map { prev.duration + _ } getOrElse { prev.duration },
       maxMemory = newMaxMemory,
       shortcircuit = shortcircuit)

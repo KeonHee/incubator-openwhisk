@@ -161,7 +161,9 @@ trait WhiskTriggersApi extends WhiskCollectionAPI {
               val args: JsObject = trigger.parameters.merge(payload).getOrElse(JsObject.empty)
 
               activateRules(user, args, trigger.rules.getOrElse(Map.empty))
-                .map(results => triggerActivation.withLogs(ActivationLogs(results.map(_.toJson.compactPrint).toVector)))
+                .map(results => {
+                  triggerActivation.withAnnotations(Parameters("components", results.map(_.toJson).toJson))
+                })
                 .recover {
                   case e =>
                     logging.error(this, s"Failed to write action activation results to trigger activation: $e")

@@ -69,7 +69,7 @@ class SequenceAccountingTests extends FlatSpec with Matchers with WskActorSystem
     val s = SequenceAccounting(2, okRes1)
     s.atomicActionCnt shouldBe 2
     s.previousResponse.get shouldBe okRes1
-    s.logs shouldBe empty
+    s.components shouldBe empty
     s.duration shouldBe 0
     s.maxMemory shouldBe None
     s.shortcircuit shouldBe false
@@ -80,8 +80,8 @@ class SequenceAccountingTests extends FlatSpec with Matchers with WskActorSystem
     val n1 = p.maybe(okActivation, 3, 5)
     n1.atomicActionCnt shouldBe 3
     n1.previousResponse.get shouldBe okRes2
-    n1.logs.length shouldBe 1
-    n1.logs(0) shouldBe okActivation.activationId
+    n1.components.length shouldBe 1
+    n1.components(0) shouldBe okActivation.activationId
     n1.duration shouldBe 123
     n1.maxMemory shouldBe Some(128)
     n1.shortcircuit shouldBe false
@@ -93,9 +93,9 @@ class SequenceAccountingTests extends FlatSpec with Matchers with WskActorSystem
     val n2 = n1.maybe(notOkActivation, 4, 5)
     n2.atomicActionCnt shouldBe 4
     n2.previousResponse.get shouldBe failedRes
-    n2.logs.length shouldBe 2
-    n2.logs(0) shouldBe okActivation.activationId
-    n2.logs(1) shouldBe notOkActivation.activationId
+    n2.components.length shouldBe 2
+    n2.components(0) shouldBe okActivation.activationId
+    n2.components(1) shouldBe notOkActivation.activationId
     n2.duration shouldBe (123 + 234)
     n2.maxMemory shouldBe Some(256)
     n2.shortcircuit shouldBe true
@@ -106,8 +106,8 @@ class SequenceAccountingTests extends FlatSpec with Matchers with WskActorSystem
     val n = p.maybe(okActivation, 3, 2)
     n.atomicActionCnt shouldBe 3
     n.previousResponse.get shouldBe ActivationResponse.applicationError(Messages.sequenceIsTooLong)
-    n.logs.length shouldBe 1
-    n.logs(0) shouldBe okActivation.activationId
+    n.components.length shouldBe 1
+    n.components(0) shouldBe okActivation.activationId
     n.duration shouldBe 123
     n.maxMemory shouldBe Some(128)
     n.shortcircuit shouldBe true
@@ -119,8 +119,8 @@ class SequenceAccountingTests extends FlatSpec with Matchers with WskActorSystem
     val f = n.fail(failedRes, None)
     f.atomicActionCnt shouldBe 3
     f.previousResponse.get shouldBe failedRes
-    f.logs.length shouldBe 1
-    f.logs(0) shouldBe okActivation.activationId
+    f.components.length shouldBe 1
+    f.components(0) shouldBe okActivation.activationId
     f.duration shouldBe 123
     f.maxMemory shouldBe Some(128)
     f.shortcircuit shouldBe true
