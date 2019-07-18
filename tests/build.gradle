@@ -55,6 +55,18 @@ def systemIncludes = [
             "system/rest/**",
 ]
 
+def newArchitecture = [
+        "org/apache/openwhisk/core/etcd/**"
+]
+
+def newArchitectureSystemIncludes = systemIncludes + [
+        "org/apache/openwhisk/core/etcd/EtcdClientTests*"
+]
+
+def newArchitectureUnitIncludes = [
+        "org/apache/openwhisk/core/etcd/EtcdLeaderShipTests*"
+]
+
 ext.testSets = [
     "REQUIRE_ONLY_DB" : [
         "includes" : [
@@ -68,15 +80,15 @@ ext.testSets = [
             "**/*CacheConcurrencyTests*",
             "**/*ControllerApiTests*",
             "org/apache/openwhisk/testEntities/**",
-            'invokerShoot/**'
-        ]
+            "invokerShoot/**",
+        ] + newArchitecture
     ],
     "REQUIRE_SYSTEM" : [
         "includes" : systemIncludes,
         "excludes": [
             "system/basic/WskMultiRuntimeTests*",
             'invokerShoot/**'
-        ]
+        ] + newArchitecture
     ],
     "REQUIRE_MULTI_RUNTIME" : [
         "includes" : [
@@ -102,6 +114,12 @@ ext.testSets = [
             "system/basic/WskMultiRuntimeTests*",
             "invokerShoot/**"
         ]
+    ],
+    "REQUIRE_NEW_ARCHITECTURE_SYSTEM" : [
+        "includes" : newArchitectureSystemIncludes
+    ],
+    "REQUIRE_NEW_ARCHITECTURE_UNIT" : [
+        "includes" : newArchitectureUnitIncludes
     ]
 ]
 
