@@ -33,6 +33,4 @@ $ANSIBLE_CMD initdb.yml
 $ANSIBLE_CMD wipe.yml
 
 $ANSIBLE_CMD properties.yml -e manifest_file="$RUNTIMES_MANIFEST"
-
-$ANSIBLE_CMD etcd.yml
 echo "Time taken for ${0##*/} is $SECONDS secs"
