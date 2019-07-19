@@ -60,6 +60,7 @@ before_install:
   - ./tools/travis/docker.sh
   - pip install --upgrade pip setuptools six
   - pip3 install --upgrade pip setuptools six
+  - node ./tools/label-trigger.js $TRAVIS_PULL_REQUEST
 
 install:
   - ./tools/travis/setup.sh
